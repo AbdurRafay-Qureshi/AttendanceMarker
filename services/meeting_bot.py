@@ -750,16 +750,18 @@ class MeetingBot:
 
     def stop(self):
         self.running = False
+        self.user_stopped = True
 
     def _cleanup(self):
         self.running = False
 
         if self.driver:
-            try:
-                # Close the active meeting tab but leave other tabs (like the dashboard) open
-                self.driver.close()
-            except Exception:
-                pass
+            if getattr(self, 'user_stopped', False):
+                try:
+                    # Close the active meeting tab but leave other tabs (like the dashboard) open
+                    self.driver.close()
+                except Exception:
+                    pass
             try:
                 # Stop the webdriver service process to prevent zombies
                 self.driver.service.stop()

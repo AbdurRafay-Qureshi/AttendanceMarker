@@ -1,7 +1,11 @@
 import json
 import os
 import re
+import shutil
+import subprocess
 import threading
+import time
+from datetime import datetime
 
 from flask import Blueprint, jsonify, render_template, request
 
@@ -14,7 +18,6 @@ google_bp = Blueprint('google', __name__)
 _login_browser_open = False
 
 _SUPPORTED_BROWSERS = ('edge', 'chrome')
-_PROFILE_MODES = ('linked_profile', 'managed_folder')
 
 
 def _is_windows():
@@ -202,37 +205,9 @@ def _profile_is_valid(root_path, profile_name, browser_type=None):
     return os.path.isdir(root_path) and os.path.isdir(profile_dir)
 
 
-def _normalize_profile_mode(value):
-    mode = (value or '').strip().lower()
-    if mode in _PROFILE_MODES:
-        return mode
-    return 'linked_profile'
-
-
-def _validate_managed_user_data_dir(browser_type, managed_dir):
-    if browser_type != 'edge':
-        return None, 'Managed folder mode is currently supported for Edge only.'
-
-    target = (managed_dir or '').strip() or config.DEFAULT_MANAGED_EDGE_USER_DATA_DIR
-    normalized = os.path.abspath(os.path.normpath(target))
-    if not os.path.isabs(normalized):
-        return None, 'Managed folder path must be an absolute path.'
-
-    try:
-        os.makedirs(normalized, exist_ok=True)
-    except Exception as exc:
-        return None, f'Could not create managed folder path: {exc}'
-
-    return normalized, None
-
 
 def _has_profile_configured(settings):
-    profile_mode = _normalize_profile_mode(getattr(settings, 'profile_mode', None))
     browser_type = (settings.browser_type or 'chrome').lower()
-
-    if profile_mode == 'managed_folder':
-        managed_dir = (settings.managed_user_data_dir or '').strip()
-        return browser_type == 'edge' and bool(managed_dir) and os.path.isdir(managed_dir)
 
     has_profile = settings.chrome_profile_path is not None and settings.chrome_profile_name is not None
     if not has_profile:
@@ -250,11 +225,8 @@ def setup():
     default_browser_type = _get_default_chromium_browser()
     if (settings.browser_type or '').lower() not in _SUPPORTED_BROWSERS:
         settings.browser_type = default_browser_type
-    settings.profile_mode = _normalize_profile_mode(getattr(settings, 'profile_mode', None))
-    if settings.profile_mode == 'managed_folder':
+    if settings.browser_type == 'chrome' and _is_windows():
         settings.browser_type = 'edge'
-    if not settings.managed_user_data_dir:
-        settings.managed_user_data_dir = config.DEFAULT_MANAGED_EDGE_USER_DATA_DIR
     db.session.commit()
 
     available_profiles = _discover_browser_profiles()
@@ -267,9 +239,6 @@ def setup():
         selected_profile=settings.chrome_profile_name,
         selected_browser_type=(settings.browser_type or default_browser_type).lower(),
         default_browser_type=default_browser_type,
-        selected_profile_mode=settings.profile_mode,
-        managed_user_data_dir=settings.managed_user_data_dir or config.DEFAULT_MANAGED_EDGE_USER_DATA_DIR,
-        default_managed_user_data_dir=config.DEFAULT_MANAGED_EDGE_USER_DATA_DIR,
         browser_open=_login_browser_open,
     )
 
@@ -285,8 +254,6 @@ def launch_login():
     root_path = (payload.get('root_path') or '').strip()
     profile_name = (payload.get('profile_name') or '').strip()
     browser_type = (payload.get('browser_type') or settings.browser_type or _get_default_chromium_browser()).strip().lower()
-    profile_mode = _normalize_profile_mode(payload.get('profile_mode') or settings.profile_mode)
-    managed_user_data_dir = (payload.get('managed_user_data_dir') or '').strip()
 
     if browser_type not in _SUPPORTED_BROWSERS:
         return jsonify({'error': 'Unsupported browser type. Choose Edge or Chrome.'}), 400
@@ -294,28 +261,15 @@ def launch_login():
     launch_root_path = root_path
     launch_profile_name = profile_name
 
-    if profile_mode == 'managed_folder':
-        launch_root_path, path_error = _validate_managed_user_data_dir(browser_type, managed_user_data_dir)
-        if path_error:
-            return jsonify({'error': path_error}), 400
-        launch_profile_name = 'Default'
-    else:
-        if not root_path or not profile_name:
-            return jsonify({'error': f'Please select a {browser_type.title()} profile first'}), 400
+    if not root_path or not profile_name:
+        return jsonify({'error': f'Please select a {browser_type.title()} profile first'}), 400
 
-        if not _profile_is_valid(root_path, profile_name, browser_type):
-            return jsonify({'error': f'Selected {browser_type.title()} profile is not valid'}), 400
+    if not _profile_is_valid(root_path, profile_name, browser_type):
+        return jsonify({'error': f'Selected {browser_type.title()} profile is not valid'}), 400
 
-    settings.profile_mode = profile_mode
     settings.browser_type = browser_type
-    if profile_mode == 'managed_folder':
-        settings.browser_type = 'edge'
-        settings.managed_user_data_dir = launch_root_path
-    else:
-        settings.chrome_profile_path = root_path
-        settings.chrome_profile_name = profile_name
-        if managed_user_data_dir:
-            settings.managed_user_data_dir = os.path.abspath(os.path.normpath(managed_user_data_dir))
+    settings.chrome_profile_path = root_path
+    settings.chrome_profile_name = profile_name
     db.session.commit()
 
     def open_browser():
@@ -325,33 +279,33 @@ def launch_login():
         try:
             from selenium import webdriver
 
-            target_url = 'https://teams.microsoft.com'
+            target_url = 'about:blank'
 
-            if profile_mode == 'managed_folder':
-                options = webdriver.EdgeOptions()
-                options.add_argument(f'--user-data-dir={launch_root_path}')
-                options.add_argument('--profile-directory=Default')
-                options.add_argument('--no-first-run')
-                options.add_argument('--no-default-browser-check')
-                options.add_argument('--disable-features=msEdgeSidebarV2')
-                driver = create_edge_driver(options)
-            elif browser_type == 'edge':
+            if browser_type == 'edge':
+                subprocess.run(['taskkill', '/IM', 'msedge.exe', '/F'], capture_output=True, check=False)
+                time.sleep(1)
                 options = webdriver.EdgeOptions()
                 options.add_argument(f'--user-data-dir={launch_root_path}')
                 options.add_argument(f'--profile-directory={launch_profile_name}')
                 options.add_argument('--no-first-run')
                 options.add_argument('--no-default-browser-check')
                 options.add_argument('--disable-features=msEdgeSidebarV2')
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_experimental_option('excludeSwitches', ['enable-automation'])
+                options.add_experimental_option('useAutomationExtension', False)
                 driver = create_edge_driver(options)
             else:
-                import undetected_chromedriver as uc
-
-                options = uc.ChromeOptions()
+                subprocess.run(['taskkill', '/IM', 'chrome.exe', '/F'], capture_output=True, check=False)
+                time.sleep(1)
+                options = webdriver.ChromeOptions()
                 options.add_argument(f'--user-data-dir={launch_root_path}')
                 options.add_argument(f'--profile-directory={launch_profile_name}')
                 options.add_argument('--no-first-run')
                 options.add_argument('--no-default-browser-check')
-                driver = uc.Chrome(options=options)
+                options.add_argument('--disable-blink-features=AutomationControlled')
+                options.add_experimental_option('excludeSwitches', ['enable-automation'])
+                options.add_experimental_option('useAutomationExtension', False)
+                driver = webdriver.Chrome(options=options)
 
             driver.get(target_url)
 
@@ -388,7 +342,5 @@ def status():
             'configured': has_profile,
             'browser_open': _login_browser_open,
             'browser_type': (settings.browser_type or _get_default_chromium_browser()).lower(),
-            'profile_mode': _normalize_profile_mode(settings.profile_mode),
-            'managed_user_data_dir': settings.managed_user_data_dir or config.DEFAULT_MANAGED_EDGE_USER_DATA_DIR,
         }
     )

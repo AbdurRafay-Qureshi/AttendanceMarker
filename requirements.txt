@@ -4,5 +4,4 @@ Flask-SocketIO==5.3.6
 Werkzeug==3.0.1
 selenium==4.15.2
 webdriver-manager==4.0.2
-undetected-chromedriver==3.5.5
 pydub==0.25.1

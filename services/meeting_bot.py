@@ -182,82 +182,31 @@ class MeetingBot:
         return 'winerror 32' in text or 'being used by another process' in text
 
     def _launch_chrome(self):
+        import subprocess
+
         from selenium import webdriver
 
         settings = Settings.get()
-        browser_type = (settings.browser_type or 'chrome').lower()
-        profile_mode = (settings.profile_mode or 'linked_profile').lower()
-        profile_root = None
-        profile_name = None
+        browser_type = (settings.browser_type or 'edge').lower()
 
-        if profile_mode == 'managed_folder':
-            if browser_type != 'edge':
-                raise UnsupportedFlowError('Managed folder mode currently supports Edge only.')
-            profile_root = (settings.managed_user_data_dir or '').strip()
-            if not profile_root:
-                raise UnsupportedFlowError('Managed folder path is missing. Reconfigure Browser Profile Setup.')
-            try:
-                os.makedirs(profile_root, exist_ok=True)
-            except Exception as exc:
-                raise UnsupportedFlowError(f'Could not access managed folder path: {exc}')
-            profile_name = 'Default'
-            self._update_session(log_message=f'Using managed Edge user-data folder: {profile_root}')
+        if not settings.chrome_profile_path:
+            raise UnsupportedFlowError('Browser profile is not configured. Open Browser Profile Setup first.')
+
+        profile_root = settings.chrome_profile_path
+        profile_name = settings.chrome_profile_name or 'Default'
+        source_profile_dir = os.path.join(profile_root, profile_name)
+
+        if not os.path.isdir(profile_root) or not os.path.isdir(source_profile_dir):
+            raise UnsupportedFlowError('Configured browser profile was not found. Reconfigure Browser Profile Setup.')
+
+        # Kill the browser so Selenium can use the real profile
+        if browser_type == 'edge':
+            self._update_session(log_message='Closing Edge to use your real profile...')
+            subprocess.run(['taskkill', '/IM', 'msedge.exe', '/F'], capture_output=True, check=False)
         else:
-            if not settings.chrome_profile_path:
-                raise UnsupportedFlowError('Browser profile is not configured. Open Browser Profile Setup first.')
-
-            profile_root = settings.chrome_profile_path
-            profile_name = settings.chrome_profile_name or 'Default'
-            source_profile_dir = os.path.join(profile_root, profile_name)
-
-            if not os.path.isdir(profile_root) or not os.path.isdir(source_profile_dir):
-                raise UnsupportedFlowError('Configured browser profile was not found. Reconfigure Browser Profile Setup.')
-
-            self._update_session(log_message='Preparing isolated runtime browser profile...')
-            temp_profile_root = tempfile.mkdtemp(prefix='meetbot-profile-')
-            self.runtime_profile_root = temp_profile_root
-            temp_profile_dir = os.path.join(temp_profile_root, profile_name)
-            copied_to_runtime = False
-
-            try:
-                local_state_path = os.path.join(profile_root, 'Local State')
-                if os.path.isfile(local_state_path):
-                    shutil.copy2(local_state_path, os.path.join(temp_profile_root, 'Local State'))
-                shutil.copytree(source_profile_dir, temp_profile_dir, dirs_exist_ok=True)
-                copied_to_runtime = True
-            except Exception as exc:
-                if browser_type == 'edge' and self._is_windows_profile_lock_error(exc):
-                    managed_root = (
-                        (settings.managed_user_data_dir or '').strip()
-                        or config.DEFAULT_MANAGED_EDGE_USER_DATA_DIR
-                    )
-                    try:
-                        os.makedirs(managed_root, exist_ok=True)
-                    except Exception as create_exc:
-                        raise UnsupportedFlowError(
-                            f'Failed to copy browser profile and managed folder creation failed: {create_exc}'
-                        )
-
-                    try:
-                        settings.profile_mode = 'managed_folder'
-                        settings.browser_type = 'edge'
-                        settings.managed_user_data_dir = managed_root
-                        db.session.commit()
-                    except Exception:
-                        pass
-
-                    shutil.rmtree(temp_profile_root, ignore_errors=True)
-                    self.runtime_profile_root = None
-                    profile_root = managed_root
-                    profile_name = 'Default'
-                    self._update_session(
-                        log_message=f'Edge profile is locked. Switched to managed folder: {managed_root}'
-                    )
-                else:
-                    raise UnsupportedFlowError(f'Failed to copy browser profile: {exc}')
-
-            if copied_to_runtime:
-                profile_root = temp_profile_root
+            self._update_session(log_message='Closing Chrome to use your real profile...')
+            subprocess.run(['taskkill', '/IM', 'chrome.exe', '/F'], capture_output=True, check=False)
+        time.sleep(2)
 
         if browser_type == 'edge':
             options = webdriver.EdgeOptions()
@@ -268,6 +217,10 @@ class MeetingBot:
             options.add_argument('--no-first-run')
             options.add_argument('--no-default-browser-check')
             options.add_argument('--disable-features=msEdgeSidebarV2')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_experimental_option('detach', True)
             options.page_load_strategy = 'eager'
         else:
             options = webdriver.ChromeOptions()
@@ -278,6 +231,10 @@ class MeetingBot:
             options.add_argument('--no-first-run')
             options.add_argument('--no-default-browser-check')
             options.add_argument('--disable-features=ProfilePickerOnStartup')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_experimental_option('detach', True)
             options.add_argument('--remote-allow-origins=*')
             options.page_load_strategy = 'eager'
 
@@ -292,7 +249,7 @@ class MeetingBot:
             except Exception as exc:
                 result['error'] = exc
 
-        self._update_session(log_message=f'Opening {browser_type.title()} automation session...')
+        self._update_session(log_message=f'Opening {browser_type.title()} with your real profile...')
         thread = threading.Thread(target=_start_driver, daemon=True)
         thread.start()
         thread.join(timeout=35)
@@ -305,9 +262,22 @@ class MeetingBot:
             raise UnsupportedFlowError('Browser did not start correctly.')
 
         self.driver = result['driver']
+
+        stealth_js = "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
         intercept_js = get_webrtc_intercept_js(self.session_id)
-        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': intercept_js})
-        self._update_session(log_message='Browser session ready')
+        self.driver.execute_cdp_cmd(
+            'Page.addScriptToEvaluateOnNewDocument',
+            {'source': stealth_js + '\n' + intercept_js},
+        )
+        self._update_session(log_message='Browser session ready (stealth mode, real profile)')
+        
+        try:
+            self._update_session(log_message='Re-opening app dashboard in background tab...')
+            self.driver.execute_script("window.open('http://127.0.0.1:5001/dashboard', '_blank');")
+            self.driver.switch_to.window(self.driver.window_handles[0])
+        except Exception:
+            pass
+
 
     def _get_body_text(self):
         from selenium.webdriver.common.by import By
@@ -319,61 +289,73 @@ class MeetingBot:
 
     def _try_click_candidates(self, stage, selector_group, css_selectors=None, xpath_selectors=None, timeout=4):
         from selenium.webdriver.common.by import By
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.webdriver.support.ui import WebDriverWait
 
         started = time.time()
         css_selectors = css_selectors or []
         xpath_selectors = xpath_selectors or []
 
-        for css in css_selectors:
-            try:
-                element = WebDriverWait(self.driver, timeout).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, css))
-                )
-                element.click()
-                return True, f'css:{css}'
-            except Exception:
-                continue
+        while time.time() - started < timeout:
+            if not getattr(self, 'running', True):
+                break
 
-        for xpath in xpath_selectors:
-            try:
-                element = WebDriverWait(self.driver, timeout).until(
-                    EC.element_to_be_clickable((By.XPATH, xpath))
-                )
-                element.click()
-                return True, f'xpath:{xpath}'
-            except Exception:
-                continue
+            for css in css_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, css)
+                    for button in elements:
+                        if button.is_displayed() and button.is_enabled():
+                            button.click()
+                            return True, f'css:{css}'
+                except Exception:
+                    pass
 
-        self._record_stage_failure(stage, selector_group, started, 'No clickable selector matched')
+            for xpath in xpath_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, xpath)
+                    for button in elements:
+                        if button.is_displayed() and button.is_enabled():
+                            button.click()
+                            return True, f'xpath:{xpath}'
+                except Exception:
+                    pass
+            
+            time.sleep(1)
+
+        if getattr(self, 'running', True):
+            self._record_stage_failure(stage, selector_group, started, 'No clickable selector matched')
         return False, None
 
     def _toggle_control_if_unmuted(self, selectors, label):
         from selenium.webdriver.common.by import By
+        import time
 
-        for selector in selectors:
-            try:
-                for button in self.driver.find_elements(By.CSS_SELECTOR, selector):
-                    if not button.is_displayed():
-                        continue
-                    attrs = ' '.join(
-                        [
-                            button.get_attribute('aria-label') or '',
-                            button.get_attribute('title') or '',
-                            button.get_attribute('data-state') or '',
-                            button.get_attribute('data-is-muted') or '',
-                        ]
-                    ).lower()
-                    should_click = 'on' in attrs or 'unmute' in attrs or 'turn off' in attrs
-                    if button.get_attribute('data-is-muted') == 'false':
-                        should_click = True
-                    if should_click:
-                        button.click()
-                        self._update_session(log_message=f'{label} toggled off')
+        for attempt in range(6):
+            if not getattr(self, 'running', True):
+                break
+                
+            for selector in selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for button in elements:
+                        if not button.is_displayed():
+                            continue
+                        attrs = ' '.join(
+                            [
+                                button.get_attribute('aria-label') or '',
+                                button.get_attribute('title') or '',
+                                button.get_attribute('data-state') or '',
+                                button.get_attribute('data-is-muted') or '',
+                            ]
+                        ).lower()
+                        should_click = 'on' in attrs or 'unmute' in attrs or 'turn off' in attrs
+                        if button.get_attribute('data-is-muted') == 'false':
+                            should_click = True
+                        if should_click:
+                            button.click()
+                            self._update_session(log_message=f'{label} toggled off')
                         return True
-            except Exception:
-                continue
+                except Exception:
+                    pass
+            time.sleep(1)
         return False
 
     def _join_meet_flow(self):
@@ -397,11 +379,21 @@ class MeetingBot:
             raise UnsupportedFlowError('Could not open Google Meet link.')
 
         self._toggle_control_if_unmuted(
-            ['button[aria-label*="camera" i]', 'button[title*="camera" i]'],
+            [
+                '[aria-label*="camera" i][role*="button" i]',
+                '[title*="camera" i][role*="button" i]',
+                'button[aria-label*="camera" i]',
+                'button[title*="camera" i]'
+            ],
             'Camera',
         )
         self._toggle_control_if_unmuted(
-            ['button[aria-label*="microphone" i]', 'button[title*="microphone" i]'],
+            [
+                '[aria-label*="microphone" i][role*="button" i]',
+                '[title*="microphone" i][role*="button" i]',
+                '[aria-label*="mic" i][role*="button" i]',
+                'button[aria-label*="microphone" i]'
+            ],
             'Microphone',
         )
 
@@ -415,7 +407,7 @@ class MeetingBot:
                 '//span[contains(text(), "Join now")]/ancestor::button',
                 '//span[contains(text(), "Ask to join")]/ancestor::button',
             ],
-            timeout=5,
+            timeout=25,
         )
         if not join_ok:
             raise UnsupportedFlowError('Meet join button not found. UI may have changed.')
@@ -529,7 +521,7 @@ class MeetingBot:
         ok, selector_used = self._click_manifest_group(
             stage='join',
             group_name='join',
-            timeout=6,
+            timeout=25,
             optional=False,
         )
         if not ok:
@@ -764,7 +756,13 @@ class MeetingBot:
 
         if self.driver:
             try:
-                self.driver.quit()
+                # Close the active meeting tab but leave other tabs (like the dashboard) open
+                self.driver.close()
+            except Exception:
+                pass
+            try:
+                # Stop the webdriver service process to prevent zombies
+                self.driver.service.stop()
             except Exception:
                 pass
 

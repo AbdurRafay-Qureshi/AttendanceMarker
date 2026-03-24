@@ -151,11 +151,7 @@ def get_audio_playback_js(recording_id, provider='meet'):
             }}
 
             if (replacedSenders.length === 0) {{
-                try {{
-                    const fallbackAudio = new Audio('/audio/playback/{recording_id}');
-                    fallbackAudio.volume = 1.0;
-                    await fallbackAudio.play();
-                }} catch (e) {{}}
+                console.warn('[MeetBot] No WebRTC audio sender found. Audio NOT played to avoid local speaker bleed.');
             }}
 
             try {{

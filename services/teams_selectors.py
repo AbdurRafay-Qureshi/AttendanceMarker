@@ -14,18 +14,21 @@ TEAMS_SELECTOR_MANIFEST = {
     'prejoin': {
         'mic': {
             'css': [
-                'button[data-tid="toggle-mute"]',
-                'button[data-tid="prejoin-toggle-mute"]',
+                '[data-tid="toggle-mute"]',
+                '[data-tid="prejoin-toggle-mute"]',
+                '[aria-label*="microphone" i][role*="button" i]',
+                '[title*="microphone" i][role*="button" i]',
+                '[aria-label*="mic" i]',
                 'button[aria-label*="microphone" i]',
-                'button[title*="microphone" i]',
             ],
         },
         'camera': {
             'css': [
-                'button[data-tid="toggle-video"]',
-                'button[data-tid="prejoin-toggle-video"]',
+                '[data-tid="toggle-video"]',
+                '[data-tid="prejoin-toggle-video"]',
+                '[aria-label*="camera" i][role*="button" i]',
+                '[title*="camera" i][role*="button" i]',
                 'button[aria-label*="camera" i]',
-                'button[title*="camera" i]',
             ],
         },
     },

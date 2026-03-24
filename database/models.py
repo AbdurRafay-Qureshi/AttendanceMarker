@@ -15,6 +15,8 @@ class Settings(db.Model):
     browser_type = db.Column(db.String(20), nullable=False, default='chrome')
     profile_mode = db.Column(db.String(30), nullable=False, default='linked_profile')
     managed_user_data_dir = db.Column(db.String(500), nullable=True)
+    last_session_sync_at = db.Column(db.DateTime, nullable=True)
+    last_session_sync_status = db.Column(db.Text, nullable=True)
 
     @property
     def name_variants(self):

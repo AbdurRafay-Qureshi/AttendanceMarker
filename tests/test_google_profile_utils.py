@@ -36,26 +36,6 @@ class GoogleProfileUtilsTests(unittest.TestCase):
             shutil.rmtree(root_edge, ignore_errors=True)
             shutil.rmtree(root_chrome, ignore_errors=True)
 
-    def test_normalize_profile_mode(self):
-        self.assertEqual(google_profile._normalize_profile_mode('managed_folder'), 'managed_folder')
-        self.assertEqual(google_profile._normalize_profile_mode('linked_profile'), 'linked_profile')
-        self.assertEqual(google_profile._normalize_profile_mode('invalid-mode'), 'linked_profile')
-
-    def test_validate_managed_user_data_dir(self):
-        parent = tempfile.mkdtemp(prefix='managed-root-')
-        try:
-            target = os.path.join(parent, 'session-data')
-            normalized, error = google_profile._validate_managed_user_data_dir('edge', target)
-            self.assertIsNone(error)
-            self.assertEqual(normalized, os.path.abspath(target))
-            self.assertTrue(os.path.isdir(normalized))
-
-            normalized, error = google_profile._validate_managed_user_data_dir('chrome', target)
-            self.assertIsNone(normalized)
-            self.assertIn('Edge only', error)
-        finally:
-            shutil.rmtree(parent, ignore_errors=True)
-
 
 if __name__ == '__main__':
     unittest.main()

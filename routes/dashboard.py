@@ -14,17 +14,12 @@ def dashboard():
         return redirect(url_for('settings.setup'))
 
     has_recording = AudioRecording.query.first() is not None
-    profile_mode = (settings.profile_mode or 'linked_profile').lower()
-    if profile_mode == 'managed_folder':
-        managed_dir = (settings.managed_user_data_dir or '').strip()
-        has_profile = (settings.browser_type or 'chrome').lower() == 'edge' and bool(managed_dir) and os.path.isdir(managed_dir)
-    else:
-        has_profile = (
-            settings.chrome_profile_path is not None
-            and settings.chrome_profile_name is not None
-            and os.path.isdir(settings.chrome_profile_path)
-            and os.path.isdir(os.path.join(settings.chrome_profile_path, settings.chrome_profile_name))
-        )
+    has_profile = (
+        bool(settings.chrome_profile_path)
+        and bool(settings.chrome_profile_name)
+        and os.path.isdir(settings.chrome_profile_path)
+        and os.path.isdir(os.path.join(settings.chrome_profile_path, settings.chrome_profile_name))
+    )
 
     active_session = MeetingSession.query.filter(
         MeetingSession.status.notin_(['ended', 'error', 'needs_reauth', 'unsupported_flow'])

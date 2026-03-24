@@ -88,6 +88,10 @@ def _ensure_single_user_profile_columns():
             conn.execute(text("ALTER TABLE settings ADD COLUMN profile_mode VARCHAR(30) DEFAULT 'linked_profile'"))
         if 'managed_user_data_dir' not in cols:
             conn.execute(text('ALTER TABLE settings ADD COLUMN managed_user_data_dir VARCHAR(500)'))
+        if 'last_session_sync_at' not in cols:
+            conn.execute(text('ALTER TABLE settings ADD COLUMN last_session_sync_at DATETIME'))
+        if 'last_session_sync_status' not in cols:
+            conn.execute(text('ALTER TABLE settings ADD COLUMN last_session_sync_status TEXT'))
 
         rows = conn.execute(
             text(

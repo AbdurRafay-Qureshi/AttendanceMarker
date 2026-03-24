@@ -1,8 +1,8 @@
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, abort, current_app, jsonify, render_template, request
 
 from database.db import db
 from database.models import AudioRecording, MeetingSession, Settings
@@ -17,14 +17,9 @@ def _is_browser_profile_ready(settings):
     if not settings:
         return False
 
-    profile_mode = (settings.profile_mode or 'linked_profile').lower()
-    if profile_mode == 'managed_folder':
-        managed_dir = (settings.managed_user_data_dir or '').strip()
-        return (settings.browser_type or 'chrome').lower() == 'edge' and bool(managed_dir) and os.path.isdir(managed_dir)
-
     return (
-        settings.chrome_profile_path is not None
-        and settings.chrome_profile_name is not None
+        bool(settings.chrome_profile_path)
+        and bool(settings.chrome_profile_name)
         and os.path.isdir(os.path.join(settings.chrome_profile_path, settings.chrome_profile_name))
     )
 
@@ -98,13 +93,17 @@ def start():
 
 @meeting_bp.route('/status/<int:session_id>')
 def status(session_id):
-    session = MeetingSession.query.get_or_404(session_id)
+    session = db.session.get(MeetingSession, session_id)
+    if session is None:
+        abort(404)
     return render_template('meeting_status.html', session=session)
 
 
 @meeting_bp.route('/status-data/<int:session_id>')
 def status_data(session_id):
-    session = MeetingSession.query.get_or_404(session_id)
+    session = db.session.get(MeetingSession, session_id)
+    if session is None:
+        abort(404)
     return jsonify(
         {
             'status': session.status,
@@ -118,7 +117,9 @@ def status_data(session_id):
 
 @meeting_bp.route('/stop/<int:session_id>', methods=['POST'])
 def stop(session_id):
-    session = MeetingSession.query.get_or_404(session_id)
+    session = db.session.get(MeetingSession, session_id)
+    if session is None:
+        abort(404)
 
     from app import active_bots
 

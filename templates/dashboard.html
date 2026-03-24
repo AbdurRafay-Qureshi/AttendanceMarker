@@ -24,6 +24,11 @@
                 <h3>Browser Profile Setup</h3>
                 {% if settings.profile_mode == 'managed_folder' %}
                 <p>Managed Edge folder active: {{ settings.managed_user_data_dir }}</p>
+                {% if settings.last_session_sync_at %}
+                <p>Last sync: {{ settings.last_session_sync_at }}</p>
+                {% else %}
+                <p>No sync run yet. Use Browser Setup to sync login.</p>
+                {% endif %}
                 {% elif has_profile %}
                 <p>Linked browser profile active</p>
                 {% else %}
@@ -31,11 +36,7 @@
                 {% endif %}
             </div>
             <a href="{{ url_for('google.setup') }}" class="btn btn-sm">
-                {% if settings.profile_mode != 'managed_folder' %}
-                Switch Mode
-                {% else %}
-                Reconfigure
-                {% endif %}
+                Browser Setup
             </a>
         </div>
 

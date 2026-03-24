@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import config
@@ -83,31 +84,11 @@ class MeetingRouteIntegrationTests(unittest.TestCase):
         self.assertEqual(payload['provider'], 'teams')
 
         with self.app.app_context():
-            session = MeetingSession.query.get(payload['session_id'])
+            session = db.session.get(MeetingSession, payload['session_id'])
             self.assertIsNotNone(session)
             self.assertEqual(session.provider, 'teams')
 
-    @patch('routes.meeting.threading.Thread', _ImmediateThread)
-    @patch('services.meeting_bot.MeetingBot', _FakeMeetingBot)
-    def test_start_route_accepts_managed_folder_mode(self):
-        with self.app.app_context():
-            settings = Settings.get()
-            settings.profile_mode = 'managed_folder'
-            settings.browser_type = 'edge'
-            settings.managed_user_data_dir = self.managed_root
-            db.session.commit()
 
-        response = self.client.post(
-            '/meeting/start',
-            data={
-                'provider': 'meet',
-                'meeting_link': 'https://meet.google.com/abc-defg-hij',
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.get_json()
-        self.assertTrue(payload['success'])
 
 
 if __name__ == '__main__':

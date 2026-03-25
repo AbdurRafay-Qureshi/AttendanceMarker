@@ -74,7 +74,7 @@ def validate_link_for_provider(meeting_link, provider):
         )
         if not any(host == h or host.endswith(f'.{h}') for h in teams_hosts):
             return False
-        valid_path_fragments = ('/l/meetup-join/', '/meetup-join/', '/meeting')
+        valid_path_fragments = ('/l/meetup-join/', '/meetup-join/', '/meeting', '/meet/')
         return any(fragment in path for fragment in valid_path_fragments)
 
     return False

@@ -37,6 +37,12 @@ class ProviderRoutingTests(unittest.TestCase):
                 'teams',
             )
         )
+        self.assertTrue(
+            validate_link_for_provider(
+                'https://teams.live.com/meet/9392728365853?p=vpGLfkJ29eOlYTrJ1N/',
+                'teams',
+            )
+        )
         self.assertFalse(validate_link_for_provider('https://teams.microsoft.com/', 'teams'))
         self.assertFalse(validate_link_for_provider('https://meet.google.com/abc-defg-hij', 'teams'))
 
